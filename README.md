@@ -38,7 +38,7 @@ Full checklist: [docs/SETUP.md#prerequisites](docs/SETUP.md#prerequisites).
 From a clean clone of the target repository on `main`:
 
 ```sh
-bash <(curl -fsSL https://raw.githubusercontent.com/premeq/remcc/main/install.sh) init
+bash <(curl -fsSL https://raw.githubusercontent.com/foster-systems/remcc/main/install.sh) init
 ```
 
 Verifies prerequisites, configures GitHub-side controls (default-branch approval ruleset, secret scanning, secrets, `opsx:apply` defaults), writes the workflow and template files, and opens a `remcc-init` PR for you to merge. See [docs/SETUP.md](docs/SETUP.md).
@@ -111,7 +111,7 @@ Deeper hardening caveats (org-vs-user-owned repo, GHAS-gated controls) live in [
 ## Upgrade
 
 ```sh
-bash <(curl -fsSL https://raw.githubusercontent.com/premeq/remcc/main/install.sh) upgrade
+bash <(curl -fsSL https://raw.githubusercontent.com/foster-systems/remcc/main/install.sh) upgrade
 ```
 
 Opens a `remcc-upgrade` PR with the template diff — see [docs/SETUP.md#upgrading-remcc](docs/SETUP.md#upgrading-remcc).
