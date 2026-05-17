@@ -9,4 +9,4 @@ I want to run Claude Code authoring code in unattended mode where where and I do
 - [x] R3: The merge request that is opened by the bot after verify, to be authored by the bot and not me, so that I can do a proper code review and merge without overriding branch protection rules. (Shipped via `pr-author-github-app` — bot identity is now a dedicated GitHub App.)
 - [x] R4: cloud run `opsx:verify` after apply and... automatically fix? or: highlight in PR -> human review -> another go. (Shipped via `actions-verify-after-apply`, archived 2026-05-15)
 - [x] R5: clearly focus remcc on github org accounts, but keep private accounts supported; re-scan existing adopters and identify setup gaps
-- [ ] R6: Codify the working loop: describe the bigger problem → propose → iterate → split into smaller bite-size changes → apply changes one-by-one via remcc.
+- [ ] R6: Codify the working loop: describe the bigger problem → iterate → plan: split into bite-sized changes → apply changes one-by-one via remcc, according to any dependency order.
