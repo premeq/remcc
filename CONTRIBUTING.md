@@ -18,9 +18,23 @@ contributions land via fork + pull request.
 - The maintainer is solo and best-effort. Expect a few days'
   turnaround; ping the PR if it goes quiet for over a week.
 
+## Local checks
+
+There is no CI; run these before opening a PR:
+
+- `shellcheck -S warning install.sh scripts/*.sh` — shell lint.
+- `scripts/test-resolve-pm.sh` — fast, offline truth-table for the
+  package-manager resolver (no network, no GitHub). Run this whenever
+  you touch `install.sh`'s prerequisite logic or the workflow's
+  package-manager handling.
+- The `scripts/smoke-*.sh` end-to-end checks require live GitHub +
+  credentials and create throwaway repos — run them only when changing
+  adoption/upgrade behavior. Set `SMOKE_PM=bun` (default `pnpm`) to
+  exercise the bun adoption path.
+
 ## Scope
 
 remcc v1 is intentionally narrow: Claude Code, GitHub Actions,
-OpenSpec `/opsx:apply`, pnpm-managed JavaScript repos
+OpenSpec `/opsx:apply`, pnpm- or bun-managed JavaScript repos
 (see [README.md](README.md#limitations)). Generalising any of those
 is in scope but warrants an issue first so we don't duplicate effort.

@@ -44,7 +44,19 @@ done
 : "${REMCC_APP_ID:?must be set — numeric App ID for the remcc GitHub App}"
 : "${REMCC_APP_PRIVATE_KEY:?must be set — PEM-encoded private key for the remcc GitHub App}"
 : "${REMCC_APP_SLUG:?must be set — slug from the App URL (github.com/apps/<slug>)}"
-for t in gh jq pnpm git curl; do
+# Package manager under test. Default pnpm keeps existing behavior and existing
+# live runs byte-for-byte unchanged; SMOKE_PM=bun exercises the bun path.
+# Note: `bun install` on a dependency-free package.json deletes the empty
+# lockfile, so the bun fixture pulls one tiny zero-dep package (left-pad) to
+# produce a real bun.lock that `bun install --frozen-lockfile` can consume.
+# pnpm writes a valid lockfile even with no deps, so its fixture stays dep-free.
+SMOKE_PM="${SMOKE_PM:-pnpm}"
+case "$SMOKE_PM" in
+  pnpm) SMOKE_PM_SPEC="pnpm@9.12.3"; SMOKE_PM_INSTALL=(pnpm install --silent) ;;
+  bun)  SMOKE_PM_SPEC="bun@1.1.34";  SMOKE_PM_INSTALL=(bun add left-pad@1.3.0) ;;
+  *)    echo "SMOKE_PM must be 'pnpm' or 'bun' (got: '$SMOKE_PM')" >&2; exit 1 ;;
+esac
+for t in gh jq "$SMOKE_PM" git curl; do
   command -v "$t" >/dev/null || { echo "missing tool: $t" >&2; exit 1; }
 done
 
@@ -87,19 +99,19 @@ if [ "$SKIP_SETUP" = 0 ]; then
   gh repo create "$TARGET" --private --add-readme
   gh repo clone "$TARGET" "$WORKDIR"
   cd "$WORKDIR"
-  cat > package.json <<'JSON'
+  cat > package.json <<JSON
 {
   "name": "remcc-smoke",
   "private": true,
-  "packageManager": "pnpm@9.12.3"
+  "packageManager": "${SMOKE_PM_SPEC}"
 }
 JSON
-  # `touch pnpm-lock.yaml` produces an empty file that pnpm rejects as broken
-  # (ERR_PNPM_BROKEN_LOCKFILE) the moment the workflow runs
-  # `pnpm install --frozen-lockfile`. Run a real install instead — for a
-  # dep-free package.json this writes a minimal-but-valid 114-byte lockfile.
-  pnpm install --silent >/dev/null 2>&1 \
-    || { echo "pnpm install (seed lockfile) failed" >&2; exit 1; }
+  # An empty lockfile is rejected by both managers' `--frozen-lockfile` the
+  # moment the workflow runs `<pm> install`. Seed a real lockfile instead
+  # (pnpm: a dep-free `pnpm install`; bun: `bun add` one tiny zero-dep pkg,
+  # since `bun install` deletes an empty lockfile — see note above).
+  "${SMOKE_PM_INSTALL[@]}" >/dev/null 2>&1 \
+    || { echo "${SMOKE_PM} seed install (${SMOKE_PM_INSTALL[*]}) failed" >&2; exit 1; }
   mkdir -p openspec .claude
   # Seed a realistic operator-customized .claude/settings.json so the
   # overwrite assertion in Step 3 has something concrete to detect.

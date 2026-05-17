@@ -109,7 +109,8 @@ Options:
 
 Behavior:
   1. Verifies prerequisites (admin on target, OpenSpec initialised,
-     pnpm-lock.yaml present, local tools installed).
+     pnpm- or bun-managed repo with a matching lockfile present,
+     local tools installed).
   2. Resolves a remcc ref and shallow-clones premeq/remcc at that ref
      into a tempdir (cleaned up on exit).
   3. Runs the cloned gh-bootstrap.sh against the target repo (branch
@@ -160,7 +161,8 @@ Behavior:
      exist on `origin/main`. If it does not, the command exits non-zero
      pointing at `install.sh init`.
   2. Verifies the same prerequisites as `init` (admin on target,
-     OpenSpec initialised, pnpm-lock.yaml present, local tools).
+     OpenSpec initialised, pnpm- or bun-managed repo with a matching
+     lockfile present, local tools).
   3. Resolves a remcc ref and shallow-clones premeq/remcc at that ref
      into a tempdir (cleaned up on exit).
   4. Overwrites template-managed files in the working tree:
@@ -264,15 +266,20 @@ verify_main_branch_exists() {
 }
 
 verify_prereqs() {
-  local repo="$1"
+  local repo="$1" pm
   log "Verifying prerequisites"
 
   require_local_tool gh
   require_local_tool jq
   require_local_tool git
-  require_local_tool pnpm
   verify_node_version
-  sub "local tools: gh, jq, git, node, pnpm ok"
+
+  # Resolve the target repo's declared package manager (pnpm or bun) and
+  # require only that manager's local tool — pnpm adopters need pnpm, bun
+  # adopters need bun, neither needs the other.
+  pm="$(resolve_package_manager)"
+  require_local_tool "${pm}"
+  sub "local tools: gh, jq, git, node, ${pm} ok"
 
   gh auth status >/dev/null 2>&1 \
     || err "gh is not authenticated; run 'gh auth login' first"
@@ -289,27 +296,48 @@ verify_prereqs() {
   [ -d .claude ] || err ".claude/ not found at repo root (commit Claude Code skills/commands first)"
   sub ".claude/ present"
 
-  [ -f pnpm-lock.yaml ] || err "pnpm-lock.yaml not found at repo root (remcc v1 supports pnpm-managed repos only)"
-  sub "pnpm-lock.yaml present"
-
-  verify_package_manager_field
-  sub "package.json packageManager: pnpm@<version> present"
+  verify_package_manager_lockfile "${pm}"
 }
 
-# The opsx-apply workflow uses pnpm/action-setup@v4 with no `version:` input,
-# which means it resolves the pnpm version from package.json#packageManager.
-# Without that field the workflow fails at "Setup pnpm".
-verify_package_manager_field() {
+# remcc supports pnpm- or bun-managed target repos. The package manager is
+# declared authoritatively in package.json#packageManager — the same field
+# pnpm/action-setup@v4 and oven-sh/setup-bun@v2 resolve their version from,
+# which keeps the verifier and the workflow runner in lockstep. Echoes
+# `pnpm` or `bun` on stdout; errs (no stdout) on absent/npm@/yarn@/unparseable.
+# Emits no log/sub output: the result is captured via command substitution.
+resolve_package_manager() {
   [ -f package.json ] \
-    || err "package.json not found at repo root (remcc v1 supports pnpm-managed repos only)"
+    || err "package.json not found at repo root (remcc supports pnpm- or bun-managed repos only)"
   local pm
   pm="$(jq -r '.packageManager // empty' < package.json 2>/dev/null)" \
     || err "could not parse package.json as JSON"
   [ -n "${pm}" ] \
-    || err "package.json is missing the 'packageManager' field (set it to e.g. 'pnpm@9.12.3' — required by the workflow's pnpm/action-setup step)"
+    || err "package.json is missing the 'packageManager' field (set it to e.g. 'pnpm@9.12.3' or 'bun@1.1.34' — required by the workflow's package-manager setup step)"
   case "${pm}" in
-    pnpm@*) ;;
-    *) err "package.json#packageManager is '${pm}'; remcc v1 requires 'pnpm@<version>'" ;;
+    pnpm@*) echo pnpm ;;
+    bun@*)  echo bun ;;
+    *) err "package.json#packageManager is '${pm}'; remcc supports pnpm- or bun-managed repos only (value must start with 'pnpm@' or 'bun@')" ;;
+  esac
+}
+
+# Given the resolved manager, require its matching root lockfile: pnpm-lock.yaml
+# for pnpm, or bun.lock (text, bun >= 1.2) / bun.lockb (binary, bun < 1.2) for
+# bun. Fails closed on a mismatch so a stale foreign lockfile cannot mask a
+# misdeclared packageManager.
+verify_package_manager_lockfile() {
+  local pm="$1"
+  case "${pm}" in
+    pnpm)
+      [ -f pnpm-lock.yaml ] \
+        || err "package.json declares pnpm but pnpm-lock.yaml is not present at the repo root"
+      sub "package manager: pnpm (package.json#packageManager + pnpm-lock.yaml present)"
+      ;;
+    bun)
+      [ -f bun.lock ] || [ -f bun.lockb ] \
+        || err "package.json declares bun but neither bun.lock nor bun.lockb is present at the repo root"
+      sub "package manager: bun (package.json#packageManager + bun lockfile present)"
+      ;;
+    *) err "internal: unsupported package manager '${pm}'" ;;
   esac
 }
 
@@ -931,4 +959,8 @@ main() {
   esac
 }
 
-main "$@"
+# Dispatch only when executed directly. Sourcing the script (e.g. from
+# scripts/test-resolve-pm.sh) loads the functions without running a subcommand.
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+  main "$@"
+fi

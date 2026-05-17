@@ -27,7 +27,7 @@ Push a `change/<name>` branch carrying an [OpenSpec](https://github.com/Fission-
 
 ### `01` · Prerequisites
 
-- An [OpenSpec](https://github.com/Fission-AI/OpenSpec)-initialised, pnpm-managed repo with `.claude/` committed
+- An [OpenSpec](https://github.com/Fission-AI/OpenSpec)-initialised, pnpm- or bun-managed repo with `.claude/` committed
 - A `remcc` GitHub App installed on the target repo
 - An Anthropic API key with budget
 
@@ -103,7 +103,7 @@ remcc v1 is intentionally narrow:
 - **Claude Code only.** No other AI coding agents.
 - **GitHub Actions only.** No GitLab, Bitbucket, CircleCI.
 - **OpenSpec `/opsx:apply` only.** No arbitrary prompts.
-- **pnpm-managed JavaScript repos only.** The workflow runs `pnpm install --frozen-lockfile`.
+- **pnpm- or bun-managed JavaScript repos only.** The workflow runs `<pm> install --frozen-lockfile`; npm/yarn are unsupported.
 - **One invocation per change.** Push or `workflow_dispatch`, then watch the PR.
 
 Deeper hardening caveats (org-vs-user-owned repo, GHAS-gated controls) live in [docs/SECURITY.md](docs/SECURITY.md).

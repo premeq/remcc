@@ -56,7 +56,19 @@ done
 : "${REMCC_APP_ID:?must be set — reconfigure step (at --ref) needs the App credentials}"
 : "${REMCC_APP_PRIVATE_KEY:?must be set — reconfigure step (at --ref) needs the App credentials}"
 : "${REMCC_APP_SLUG:?must be set — reconfigure step (at --ref) needs the App slug}"
-for t in gh jq pnpm git curl; do
+# Package manager under test. Default pnpm keeps existing behavior and existing
+# live runs byte-for-byte unchanged; SMOKE_PM=bun exercises the bun path.
+# Note: `bun install` on a dependency-free package.json deletes the empty
+# lockfile, so the bun fixture pulls one tiny zero-dep package (left-pad) to
+# produce a real bun.lock that `bun install --frozen-lockfile` can consume.
+# pnpm writes a valid lockfile even with no deps, so its fixture stays dep-free.
+SMOKE_PM="${SMOKE_PM:-pnpm}"
+case "$SMOKE_PM" in
+  pnpm) SMOKE_PM_SPEC="pnpm@9.12.3"; SMOKE_PM_INSTALL=(pnpm install --silent) ;;
+  bun)  SMOKE_PM_SPEC="bun@1.1.34";  SMOKE_PM_INSTALL=(bun add left-pad@1.3.0) ;;
+  *)    echo "SMOKE_PM must be 'pnpm' or 'bun' (got: '$SMOKE_PM')" >&2; exit 1 ;;
+esac
+for t in gh jq "$SMOKE_PM" git curl; do
   command -v "$t" >/dev/null || { echo "missing tool: $t" >&2; exit 1; }
 done
 
@@ -91,15 +103,15 @@ if [ "$SKIP_SETUP" = 0 ]; then
   gh repo create "$TARGET" --private --add-readme
   gh repo clone "$TARGET" "$WORKDIR"
   cd "$WORKDIR"
-  cat > package.json <<'JSON'
+  cat > package.json <<JSON
 {
   "name": "remcc-smoke-reconfigure",
   "private": true,
-  "packageManager": "pnpm@9.12.3"
+  "packageManager": "${SMOKE_PM_SPEC}"
 }
 JSON
-  pnpm install --silent >/dev/null 2>&1 \
-    || { echo "pnpm install (seed lockfile) failed" >&2; exit 1; }
+  "${SMOKE_PM_INSTALL[@]}" >/dev/null 2>&1 \
+    || { echo "${SMOKE_PM} install (seed lockfile) failed" >&2; exit 1; }
   mkdir -p openspec .claude
   touch openspec/.gitkeep .claude/.gitkeep
   git add .
