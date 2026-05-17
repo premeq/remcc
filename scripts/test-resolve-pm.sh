@@ -37,6 +37,12 @@ pkg() {
     "$1" > "$2/package.json"
 }
 
+# Write a package.json with NO packageManager field into <dir> (exercises the
+# absent-field lockfile fallback).
+pkg_nopm() {
+  printf '{\n  "name": "t",\n  "private": true\n}\n' > "$1/package.json"
+}
+
 assert_resolves() {
   # assert_resolves <dir> <expected-pm>
   local dir="$1" want="$2" got rc
@@ -116,6 +122,33 @@ assert_resolve_fails "$d" "missing the 'packageManager'"; rm -rf "$d"
 # 9. no package.json at all -> resolve fails
 d=$(case_dir)
 assert_resolve_fails "$d" "package.json not found"; rm -rf "$d"
+
+# --- absent-field lockfile fallback (this change) ---
+
+# 10. no packageManager + lone bun.lock -> resolves bun, lockfile ok
+d=$(case_dir); pkg_nopm "$d"; : > "$d/bun.lock"
+assert_resolves "$d" bun; assert_lock_ok "$d" bun; rm -rf "$d"
+
+# 11. no packageManager + lone bun.lockb -> resolves bun, lockfile ok
+d=$(case_dir); pkg_nopm "$d"; : > "$d/bun.lockb"
+assert_resolves "$d" bun; assert_lock_ok "$d" bun; rm -rf "$d"
+
+# 12. no packageManager + lone pnpm-lock.yaml -> fails pnpm-specific
+d=$(case_dir); pkg_nopm "$d"; : > "$d/pnpm-lock.yaml"
+assert_resolve_fails "$d" "pnpm-managed repos must declare"; rm -rf "$d"
+
+# 13. no packageManager + both lockfiles -> fails as ambiguous
+d=$(case_dir); pkg_nopm "$d"; : > "$d/bun.lock"; : > "$d/pnpm-lock.yaml"
+assert_resolve_fails "$d" "ambiguous"; rm -rf "$d"
+
+# 14. no packageManager + no lockfile -> still the missing-field error
+d=$(case_dir); pkg_nopm "$d"
+assert_resolve_fails "$d" "missing the 'packageManager'"; rm -rf "$d"
+
+# 15. declared bun@ wins over a stale foreign pnpm-lock.yaml (declaration
+#     is authoritative and never consults lockfiles; not ambiguous)
+d=$(case_dir); pkg "bun@1.2.2" "$d"; : > "$d/bun.lock"; : > "$d/pnpm-lock.yaml"
+assert_resolves "$d" bun; assert_lock_ok "$d" bun; rm -rf "$d"
 
 echo
 echo "resolve-pm: ${PASS} passed, ${FAIL} failed"

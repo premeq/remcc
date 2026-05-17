@@ -299,33 +299,62 @@ verify_prereqs() {
   verify_package_manager_lockfile "${pm}"
 }
 
-# remcc supports pnpm- or bun-managed target repos. The package manager is
-# declared authoritatively in package.json#packageManager — the same field
+# remcc supports pnpm- or bun-managed target repos. A declared
+# package.json#packageManager is authoritative — the same field
 # pnpm/action-setup@v4 and oven-sh/setup-bun@v2 resolve their version from,
-# which keeps the verifier and the workflow runner in lockstep. Echoes
-# `pnpm` or `bun` on stdout; errs (no stdout) on absent/npm@/yarn@/unparseable.
-# Emits no log/sub output: the result is captured via command substitution.
+# which keeps the verifier and the workflow runner in lockstep. When the
+# field is ABSENT, fall back to lockfile detection: a lone bun lockfile
+# resolves to bun (oven-sh/setup-bun@v2 needs no version), a lone
+# pnpm-lock.yaml errs with a pnpm-specific message (pnpm/action-setup@v4
+# has no version default and genuinely needs the field), and both lockfiles
+# present is rejected as ambiguous. A declared manager never consults
+# lockfiles, so a stale foreign lockfile cannot mask it. Echoes `pnpm` or
+# `bun` on stdout; errs (no stdout) on the rejected cases. Emits no
+# log/sub output: the result is captured via command substitution.
 resolve_package_manager() {
   [ -f package.json ] \
     || err "package.json not found at repo root (remcc supports pnpm- or bun-managed repos only)"
   local pm
   pm="$(jq -r '.packageManager // empty' < package.json 2>/dev/null)" \
     || err "could not parse package.json as JSON"
-  [ -n "${pm}" ] \
-    || err "package.json is missing the 'packageManager' field (set it to e.g. 'pnpm@9.12.3' or 'bun@1.1.34' — required by the workflow's package-manager setup step)"
-  case "${pm}" in
-    pnpm@*) echo pnpm ;;
-    bun@*)  echo bun ;;
-    *) err "package.json#packageManager is '${pm}'; remcc supports pnpm- or bun-managed repos only (value must start with 'pnpm@' or 'bun@')" ;;
-  esac
+  if [ -n "${pm}" ]; then
+    case "${pm}" in
+      pnpm@*) echo pnpm ;;
+      bun@*)  echo bun ;;
+      *) err "package.json#packageManager is '${pm}'; remcc supports pnpm- or bun-managed repos only (value must start with 'pnpm@' or 'bun@')" ;;
+    esac
+    return
+  fi
+
+  # packageManager absent: lockfile-derived. The fallback is bun-only and
+  # triggers solely on an absent field, and both-lockfiles is rejected, so
+  # the only way a lockfile decides anything is when there is exactly one
+  # and no declaration — unambiguous by construction.
+  local bun_lock=false pnpm_lock=false
+  if [ -f bun.lock ] || [ -f bun.lockb ]; then bun_lock=true; fi
+  if [ -f pnpm-lock.yaml ]; then pnpm_lock=true; fi
+  if [ "${bun_lock}" = true ] && [ "${pnpm_lock}" = true ]; then
+    err "package manager is ambiguous: both a bun lockfile and pnpm-lock.yaml are present and packageManager is unset — declare packageManager: bun@<version> or pnpm@<version> to disambiguate"
+  elif [ "${bun_lock}" = true ]; then
+    echo bun
+  elif [ "${pnpm_lock}" = true ]; then
+    err "pnpm-managed repos must declare packageManager: pnpm@<version> — pnpm/action-setup has no version default; bun may omit it"
+  else
+    err "package.json is missing the 'packageManager' field (set it to e.g. 'pnpm@9.12.3' or 'bun@1.1.34' — required by the workflow's package-manager setup step)"
+  fi
 }
 
 # Given the resolved manager, require its matching root lockfile: pnpm-lock.yaml
 # for pnpm, or bun.lock (text, bun >= 1.2) / bun.lockb (binary, bun < 1.2) for
 # bun. Fails closed on a mismatch so a stale foreign lockfile cannot mask a
-# misdeclared packageManager.
+# misdeclared packageManager. When bun was resolved via the absent-field
+# fallback the bun-lockfile assertion is trivially satisfied (we resolved
+# *because* the lockfile exists); the success line reflects that the field
+# was unset. pnpm is only ever reached with a declared field (a lone
+# pnpm-lock.yaml fails in resolve_package_manager), so its line is unchanged.
 verify_package_manager_lockfile() {
-  local pm="$1"
+  local pm="$1" declared
+  declared="$(jq -r '.packageManager // empty' < package.json 2>/dev/null || true)"
   case "${pm}" in
     pnpm)
       [ -f pnpm-lock.yaml ] \
@@ -335,7 +364,11 @@ verify_package_manager_lockfile() {
     bun)
       [ -f bun.lock ] || [ -f bun.lockb ] \
         || err "package.json declares bun but neither bun.lock nor bun.lockb is present at the repo root"
-      sub "package manager: bun (package.json#packageManager + bun lockfile present)"
+      if [ -n "${declared}" ]; then
+        sub "package manager: bun (package.json#packageManager + bun lockfile present)"
+      else
+        sub "package manager: bun (resolved from bun lockfile, packageManager unset)"
+      fi
       ;;
     *) err "internal: unsupported package manager '${pm}'" ;;
   esac

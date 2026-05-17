@@ -21,15 +21,16 @@ proceeding.
 | 3 | OpenSpec initialised in the repo | `test -d openspec && echo ok` |
 | 4 | `.claude/` directory committed (skills/commands available to the runner) | `test -d .claude && echo ok` |
 | 5 | **pnpm- or bun-managed JavaScript project with the matching committed lockfile at the repo root** (`pnpm-lock.yaml`, or `bun.lock`/`bun.lockb`) | `test -f pnpm-lock.yaml -o -f bun.lock -o -f bun.lockb && echo ok` |
-| 5b | `package.json` at the repo root with a `packageManager: pnpm@<version>` **or** `bun@<version>` field (consumed by `pnpm/action-setup@v4` or `oven-sh/setup-bun@v2`) | `jq -r .packageManager package.json` should print `pnpm@<version>` or `bun@<version>` |
+| 5b | `packageManager` field in root `package.json` — **required for pnpm** (`pnpm@<version>`: `pnpm/action-setup@v4` has no `version:` input and no default, so it resolves the version solely from this field), **optional for bun** (`bun@<version>` when present is authoritative; when absent the committed `bun.lock`/`bun.lockb` alone selects bun and `oven-sh/setup-bun@v2` installs the latest Bun) | `jq -r .packageManager package.json` — must print `pnpm@<version>` for a pnpm repo; for a bun repo it may print `bun@<version>` or be absent (`null`) provided a `bun.lock`/`bun.lockb` is committed and no `pnpm-lock.yaml` is present |
 | 6 | Local tools installed: `gh`, `jq`, `git`, Node.js ≥ 20.19, and your package manager (`pnpm` **or** `bun`) | `gh --version && jq --version && node -v && { pnpm -v || bun -v; }` |
 | 7 | An Anthropic API key with budget configured | (key is uploaded as a repo secret in step 3 below) |
 | 8 | A **remcc GitHub App** you control (created once, reused across all your adopter repos) with `Contents: write`, `Pull requests: write`, `Workflows: write`, `Metadata: read`, installed on the target repo, with a downloaded private-key PEM | See "Create the remcc GitHub App" below. (App ID, private key, and slug are uploaded in step 3 below.) |
 
-> **Supports pnpm- or bun-managed repos only.** The workflow detects the
-> package manager from `package.json#packageManager` and runs
-> `<pm> install --frozen-lockfile`. If your repository uses npm, yarn,
-> or no JavaScript at all, remcc will fail. Generalising to other
+> **Supports pnpm- or bun-managed repos only.** The workflow resolves the
+> package manager from `package.json#packageManager` (authoritative when
+> present) or, when that field is absent, from a lone `bun.lock`/`bun.lockb`,
+> then runs `<pm> install --frozen-lockfile`. If your repository uses npm,
+> yarn, or no JavaScript at all, remcc will fail. Generalising to other
 > package managers is deferred to a future change; until then, please
 > open an issue on the remcc repository describing your setup rather
 > than working around the constraint locally.
@@ -677,7 +678,7 @@ task itself.
 | Tool | Source | Notes |
 |---|---|---|
 | Node.js 20 | `actions/setup-node@v4` | Pinned by the workflow; do not assume the ubuntu-latest default Node version |
-| Package manager (pnpm or bun) | `pnpm/action-setup@v4` or `oven-sh/setup-bun@v2` | A "Resolve package manager" step reads `package.json#packageManager` (e.g. `pnpm@9.12.3` or `bun@1.1.34`) and runs only the matching setup action, then `<pm> install --frozen-lockfile`. Each setup action resolves its version from that field; both error if it is absent, which is why prereq 5b exists |
+| Package manager (pnpm or bun) | `pnpm/action-setup@v4` or `oven-sh/setup-bun@v2` | A "Resolve package manager" step applies the same precedence as `install.sh`: a declared `package.json#packageManager` (e.g. `pnpm@9.12.3` or `bun@1.1.34`) is authoritative; if it is absent, a lone `bun.lock`/`bun.lockb` selects bun. It then runs only the matching setup action, then `<pm> install --frozen-lockfile`. `pnpm/action-setup@v4` has no version default, so pnpm repos **must** declare the field (prereq 5b); `oven-sh/setup-bun@v2` needs no version source and installs the latest Bun, so the field is optional for bun |
 | Claude Code CLI | `npm install -g @anthropic-ai/claude-code` | Invoked with `--dangerously-skip-permissions` |
 | OpenSpec CLI | `npm install -g @fission-ai/openspec@latest` | Used for the post-apply validate step |
 | `ANTHROPIC_API_KEY` | Repo secret, exposed as env | Set by `gh-bootstrap.sh`; redacted from logs by GitHub |

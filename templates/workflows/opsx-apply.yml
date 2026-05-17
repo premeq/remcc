@@ -208,29 +208,60 @@ jobs:
           echo "Resolved model: ${model} (source: ${model_source})"
           echo "Resolved effort: ${effort} (source: ${effort_source})"
 
-      # Derive the target repo's package manager from package.json#packageManager
-      # (the same field pnpm/action-setup and oven-sh/setup-bun resolve their
-      # version from). pnpm and bun are supported; anything else fails the run
-      # before Claude Code is invoked. No adopter edits to this template needed.
+      # Derive the target repo's package manager with the SAME precedence and
+      # the SAME error strings as resolve_package_manager in install.sh, so an
+      # adopter sees identical text locally and in CI. A declared
+      # package.json#packageManager is authoritative (pnpm/action-setup and
+      # oven-sh/setup-bun resolve their version from it); when it is absent we
+      # fall back to lockfile detection — a lone bun lockfile -> bun (setup-bun
+      # needs no version), a lone pnpm-lock.yaml -> fail (pnpm/action-setup has
+      # no version default), both -> ambiguous. Anything unresolved fails the
+      # run before Claude Code is invoked. No adopter edits to this template.
       - name: Resolve package manager
         id: pm
         run: |
           set -euo pipefail
-          pm="$(jq -r '.packageManager // empty' package.json 2>/dev/null || true)"
-          if [ -z "${pm}" ]; then
-            echo "::error::package.json has no 'packageManager' field; remcc supports pnpm- or bun-managed repos only (set it to e.g. 'pnpm@9.12.3' or 'bun@1.1.34')." >&2
+          if [ ! -f package.json ]; then
+            echo "::error::package.json not found at repo root (remcc supports pnpm- or bun-managed repos only)" >&2
             exit 1
           fi
-          case "${pm}" in
-            pnpm@*) name=pnpm ;;
-            bun@*)  name=bun ;;
-            *)
-              echo "::error::package.json#packageManager is '${pm}'; remcc supports pnpm- or bun-managed repos only (value must start with 'pnpm@' or 'bun@')." >&2
+          if ! pm="$(jq -r '.packageManager // empty' package.json 2>/dev/null)"; then
+            echo "::error::could not parse package.json as JSON" >&2
+            exit 1
+          fi
+          if [ -n "${pm}" ]; then
+            case "${pm}" in
+              pnpm@*) name=pnpm ;;
+              bun@*)  name=bun ;;
+              *)
+                echo "::error::package.json#packageManager is '${pm}'; remcc supports pnpm- or bun-managed repos only (value must start with 'pnpm@' or 'bun@')" >&2
+                exit 1
+                ;;
+            esac
+            echo "name=${name}" >> "$GITHUB_OUTPUT"
+            echo "Resolved package manager: ${name} (from packageManager: ${pm})"
+          else
+            # packageManager absent: lockfile-derived fallback. Bun-only and
+            # absent-field-only; both-lockfiles is rejected, so a lockfile only
+            # ever decides when there is exactly one and no declaration.
+            bun_lock=false; pnpm_lock=false
+            if [ -f bun.lock ] || [ -f bun.lockb ]; then bun_lock=true; fi
+            if [ -f pnpm-lock.yaml ]; then pnpm_lock=true; fi
+            if [ "${bun_lock}" = true ] && [ "${pnpm_lock}" = true ]; then
+              echo "::error::package manager is ambiguous: both a bun lockfile and pnpm-lock.yaml are present and packageManager is unset — declare packageManager: bun@<version> or pnpm@<version> to disambiguate" >&2
               exit 1
-              ;;
-          esac
-          echo "name=${name}" >> "$GITHUB_OUTPUT"
-          echo "Resolved package manager: ${name} (from packageManager: ${pm})"
+            elif [ "${bun_lock}" = true ]; then
+              name=bun
+            elif [ "${pnpm_lock}" = true ]; then
+              echo "::error::pnpm-managed repos must declare packageManager: pnpm@<version> — pnpm/action-setup has no version default; bun may omit it" >&2
+              exit 1
+            else
+              echo "::error::package.json is missing the 'packageManager' field (set it to e.g. 'pnpm@9.12.3' or 'bun@1.1.34' — required by the workflow's package-manager setup step)" >&2
+              exit 1
+            fi
+            echo "name=${name}" >> "$GITHUB_OUTPUT"
+            echo "Resolved package manager: ${name} (resolved from bun lockfile; packageManager unset)"
+          fi
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
